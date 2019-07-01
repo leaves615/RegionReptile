@@ -13,14 +13,48 @@ class RegionReptile(object):
         """初始化"""
         self.provincials = []
         self.region_details = dict()
-        self.options = webdriver.ChromeOptions()
+        self.__options = webdriver.ChromeOptions()
         # 设置浏览器无界面模式
-        self.options.add_argument('--headless')
+        self.__options.add_argument('--headless')
 
-    def init_provincial(self):
+    def reptile_region_basic(self, url):
+        """解析所有区划基础数据"""
+
+        chrome = webdriver.Chrome(chrome_options=self.__options)
+        chrome.get(url)
+
+        # 获取大于三的tr标签
+        trs = chrome.find_elements_by_xpath('/html/body/div/table/tbody/tr[position()>3]')
+
+        #解析每行tr标签
+        for tr in trs:
+            texts = tr.text.split(' ')
+
+            if texts is not None and len(texts) >= 2:
+                region_detail = dict()
+                region_detail['code'] = int(texts[0])
+                region_detail['name'] = texts[1]
+                region_detail['parent_name'] = None
+                region_detail['parent_code'] = None
+                region_detail['level'] = None
+                region_detail['lon'] = None
+                region_detail['lat'] = None
+                region_detail['pinyin'] = None
+                region_detail['abbrev'] = None
+
+                self.region_details[region_detail['code']] = region_detail
+
+                print(region_detail)
+            else:
+                break
+
+        chrome.close()
+        chrome.quit()
+
+    def __init_provincial(self):
         """解析省级信息JSON"""
 
-        chrome = webdriver.Chrome(chrome_options=self.options)
+        chrome = webdriver.Chrome(chrome_options=self.__options)
         chrome.get('http://xzqh.mca.gov.cn/map')
 
         # 获取页面中的省级数据
@@ -45,62 +79,7 @@ class RegionReptile(object):
         chrome.close()
         chrome.quit()
 
-    def init_regions(self, url):
-        """解析所有区划code和name"""
-
-        chrome = webdriver.Chrome(chrome_options=self.options)
-        chrome.get(url)
-
-        # 获取大于三的tr标签
-        trs = chrome.find_elements_by_xpath('/html/body/div/table/tbody/tr[position()>3]')
-
-        for tr in trs:
-            tds = tr.find_elements_by_tag_name('td')
-
-            if tds[1].text != '':
-                region_detail = dict()
-                region_detail['code'] = int(tds[1].text)
-                region_detail['name'] = tds[2].text
-                region_detail['parent_name'] = None
-                region_detail['parent_code'] = None
-                region_detail['level'] = None
-                region_detail['lon'] = None
-                region_detail['lat'] = None
-                region_detail['pinyin'] = None
-                region_detail['abbrev'] = None
-
-                self.region_details[region_detail['code']] = region_detail
-
-                print(region_detail)
-            else:
-                break
-
-        chrome.close()
-        chrome.quit()
-
-    def reptile_region_pinyin(self):
-        """解析拼音数据"""
-
-        chrome = webdriver.Chrome(chrome_options=self.options)
-        chrome.get('http://xzqh.mca.gov.cn/map')
-
-        region_value = chrome.find_element_by_id('pyArr').get_attribute('value')
-        region_json = json.loads(region_value)
-
-        for item in region_json:
-            region_detail = self.region_details[int(item['code'])]
-
-            if region_detail is not None:
-                region_detail['pinyin'] = item['py']
-                region_detail['abbrev'] = item['jp']
-
-                print(region_detail)
-            else:
-                print(item)
-
-        chrome.close()
-        chrome.quit()
-
+    
     def reptile_region_structure(self, provincial_code, provincial_name, provincial_abbr):
         """爬取区划等级结构信息"""
 
@@ -109,7 +88,7 @@ class RegionReptile(object):
         url += parse.quote((provincial_name + "(" + provincial_abbr + ")").encode("gb2312"))
         url += '&diji=-1&xianji=-1'
 
-        chrome = webdriver.Chrome(chrome_options=self.options)
+        chrome = webdriver.Chrome(chrome_options=self.__options)
         chrome.get(url)
 
         # 获取行政区域列表
@@ -134,15 +113,11 @@ class RegionReptile(object):
 
             # 判断市级节点和区县级节点
             if tr.get_attribute('class') == 'shi_nub':
-                # 获取市级名称
-                name = tds[0].find_element_by_tag_name('input').get_attribute('value')
-
                 parent_name = provincial_name
                 parent_code = provincial_code
                 region_detail['level'] = 2
 
                 temp_region[region_detail['name']] = region_detail['code']
-
             else:
                 try:
                     # 不能获取直接跳过；跳过无具体信息的节点
@@ -150,16 +125,12 @@ class RegionReptile(object):
                 except:
                     continue
 
-                parent_code = None
                 if parent_name in temp_region:
                     parent_code = temp_region[parent_name]
-
-                if parent_code is None:
+                else:
                     parent_name = provincial_name
                     parent_code = provincial_code
 
-                # 获取并存储区域名称
-                region_detail['name'] = tds[0].get_attribute('textContent')
                 region_detail['level'] = 3
 
             if parent_code != region_detail['code']:
@@ -171,9 +142,33 @@ class RegionReptile(object):
         chrome.close()
         chrome.quit()
 
+    def reptile_region_pinyin(self):
+        """解析拼音数据"""
+
+        chrome = webdriver.Chrome(chrome_options=self.__options)
+        chrome.get('http://xzqh.mca.gov.cn/map')
+
+        region_value = chrome.find_element_by_id('pyArr').get_attribute('value')
+        region_json = json.loads(region_value)
+
+        for item in region_json:
+            region_detail = self.region_details[int(item['code'])]
+
+            if region_detail is not None:
+                region_detail['pinyin'] = item['py']
+                region_detail['abbrev'] = item['jp']
+
+                print(region_detail)
+            else:
+                print(item)
+
+        chrome.close()
+        chrome.quit()
+
     @staticmethod
-    def reptile_region_location(search_name):
+    def __get_region_location(search_name):
         """爬取行政区划地理位置信息"""
+        
         url = 'https://apis.map.qq.com/jsapi?qt=poi&wd=' + search_name
 
         try:
@@ -200,11 +195,11 @@ class RegionReptile(object):
         """爬取省级市级和区县级数据"""
 
         print('========== 初始化省级数据 ==========')
-        self.init_provincial()
+        self.__init_provincial()
 
         print()
-        print('========== 初始化区划数据 ==========')
-        self.init_regions(url)
+        print('========== 解析基础数据 ==========')
+        self.reptile_region_basic(url)
 
         print()
         print('========== 解析拼音数据 ==========')
