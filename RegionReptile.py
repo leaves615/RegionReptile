@@ -6,16 +6,53 @@ import json
 import requests
 
 
+class RegionModel(object):
+    """区域信息模型"""
+
+    def __init__(self, code, name):
+        """初始化"""
+        self.code = code
+        self.name = name
+        self.parent_code = None
+        self.parent_name = None
+        self.level = None
+        self.longitude = None
+        self.latitude = None
+        self.pinyin = None
+        self.abbreviation = None
+
+    def to_string(self):
+        model_string = '{"code":' + str(self.code)
+        model_string += ',"name":"' + str(self.name)
+        model_string += ',"parent_code:"' + str(self.parent_code)
+        model_string += ',"parent_name":"' + str(self.parent_name)
+        model_string += ',"level":' + str(self.level)
+        model_string += ',"longitude":' + str(self.longitude)
+        model_string += ',"latitude":' + str(self.latitude)
+        model_string += ',"pinyin":' + str(self.pinyin)
+        model_string += ',"abbreviation":' + str(self.abbreviation)
+        model_string += "}"
+        return model_string
+
+
 class RegionReptile(object):
-    """区域信息爬虫"""
 
     def __init__(self):
         """初始化"""
-        self.provincials = []
-        self.region_details = dict()
-        self.__options = webdriver.ChromeOptions()
+        # 存储区域信息
+        self.region_list = []
+
         # 设置浏览器无界面模式
+        self.__options = webdriver.ChromeOptions()
         self.__options.add_argument('--headless')
+
+    def __get_region_by_code(self, code):
+        """通过code获取行政列表"""
+        for item in self.region_list:
+            if item.code == code:
+                return item
+
+        return None
 
     def reptile_region_basic(self, url):
         """解析所有区划基础数据"""
@@ -26,25 +63,15 @@ class RegionReptile(object):
         # 获取大于三的tr标签
         trs = chrome.find_elements_by_xpath('/html/body/div/table/tbody/tr[position()>3]')
 
-        #解析每行tr标签
+        # 解析每行tr标签
         for tr in trs:
             texts = tr.text.split(' ')
 
             if texts is not None and len(texts) >= 2:
-                region_detail = dict()
-                region_detail['code'] = int(texts[0])
-                region_detail['name'] = texts[1]
-                region_detail['parent_name'] = None
-                region_detail['parent_code'] = None
-                region_detail['level'] = None
-                region_detail['lon'] = None
-                region_detail['lat'] = None
-                region_detail['pinyin'] = None
-                region_detail['abbrev'] = None
+                region_model = RegionModel(int(texts[0]), texts[1])
+                self.region_list.append(region_model)
 
-                self.region_details[region_detail['code']] = region_detail
-
-                print(region_detail)
+                print(region_model.to_string())
             else:
                 break
 
@@ -60,6 +87,7 @@ class RegionReptile(object):
         # 获取页面中的省级数据
         text = chrome.execute_script('return json')
 
+        provincials = []
         for item in text:
             provincial = dict()
 
@@ -72,16 +100,17 @@ class RegionReptile(object):
             provincial['abbr'] = temp[1]
 
             # 添加省级数据
-            self.provincials.append(provincial)
+            provincials.append(provincial)
 
             print(provincial)
 
         chrome.close()
         chrome.quit()
 
-    
-    def reptile_region_structure(self, provincial_code, provincial_name, provincial_abbr):
-        """爬取区划等级结构信息"""
+        return provincials
+
+    def __init_region_structure(self, provincial_code, provincial_name, provincial_abbr):
+        """爬取单个省区划等级结构信息"""
 
         # 拼接省级页面url
         url = 'http://xzqh.mca.gov.cn/defaultQuery?shengji='
@@ -109,15 +138,15 @@ class RegionReptile(object):
             if code == '' or code == str(provincial_code):
                 continue
 
-            region_detail = self.region_details[int(code)]
+            region_model = self.__get_region_by_code(int(code))
 
             # 判断市级节点和区县级节点
             if tr.get_attribute('class') == 'shi_nub':
                 parent_name = provincial_name
                 parent_code = provincial_code
-                region_detail['level'] = 2
+                region_model.level = 2
 
-                temp_region[region_detail['name']] = region_detail['code']
+                temp_region[region_model.name] = region_model.code
             else:
                 try:
                     # 不能获取直接跳过；跳过无具体信息的节点
@@ -131,16 +160,27 @@ class RegionReptile(object):
                     parent_name = provincial_name
                     parent_code = provincial_code
 
-                region_detail['level'] = 3
+                region_model.level = 3
 
-            if parent_code != region_detail['code']:
-                region_detail['parent_name'] = parent_name
-                region_detail['parent_code'] = parent_code
+            if parent_code != region_model.code:
+                region_model.parent_name = parent_name
+                region_model.parent_code = parent_code
 
-            print(region_detail)
+            print(region_model.to_string())
 
         chrome.close()
         chrome.quit()
+
+    def reptile_region_structure(self):
+        """"爬取各个省区划等级结构信息"""
+
+        provincials = self.__init_provincial()
+
+        for item in provincials:
+            region_model = self.__get_region_by_code(item['code'])
+            region_model.level = 1
+            print(region_model.to_string())
+            self.__init_region_structure(item['code'], item['name'], item['abbr'])
 
     def reptile_region_pinyin(self):
         """解析拼音数据"""
@@ -152,100 +192,50 @@ class RegionReptile(object):
         region_json = json.loads(region_value)
 
         for item in region_json:
-            region_detail = self.region_details[int(item['code'])]
+            region_model = self.__get_region_by_code(int(item['code']))
 
-            if region_detail is not None:
-                region_detail['pinyin'] = item['py']
-                region_detail['abbrev'] = item['jp']
+            if region_model is not None:
+                region_model.pinyin = item['py']
+                region_model.abbreviation = item['jp']
 
-                print(region_detail)
+                print(region_model.to_string())
             else:
                 print(item)
 
         chrome.close()
         chrome.quit()
 
-    @staticmethod
-    def __get_region_location(search_name):
+    def reptile_region_location(self):
         """爬取行政区划地理位置信息"""
-        
-        url = 'https://apis.map.qq.com/jsapi?qt=poi&wd=' + search_name
 
-        try:
-            result = requests.get(url)
-            if result.status_code == 200:
-                result_json = result.json()
+        url = 'https://apis.map.qq.com/jsapi?qt=poi&wd='
 
-                # 判断是否获取
-                if result_json['detail'] is not None and result_json['detail']['area'] is not None:
-                    area = result_json['detail']['area']
-                    location = dict()
-                    location['name'] = area['cname']
-                    location['code'] = area['acode']
-                    location['lon'] = area['pointx']
-                    location['lat'] = area['pointy']
-
-                    return location
-        except:
-            print(search_name + " No Result")
-
-        return None
-
-    def reptile_region(self, url):
-        """爬取省级市级和区县级数据"""
-
-        print('========== 初始化省级数据 ==========')
-        self.__init_provincial()
-
-        print()
-        print('========== 解析基础数据 ==========')
-        self.reptile_region_basic(url)
-
-        print()
-        print('========== 解析拼音数据 ==========')
-        self.reptile_region_pinyin()
-
-        print()
-        print('========== 解析区划结构 ==========')
-        for item in self.provincials:
-            region_detail = self.region_details[item['code']]
-            region_detail['level'] = 1
-            print(region_detail)
-            self.reptile_region_structure(item['code'], item['name'], item['abbr'])
-            print()
-
-        print()
-        print('========== 解析区划经纬度 ==========')
         # 获取经纬度信息
-        for item in self.region_details.values():
+        for item in self.region_list:
 
-            if item['parent_name'] is not None:
-                search_name = item['parent_name']
+            if item.parent_name is not None:
+                search_name = item.parent_name
             else:
                 search_name = ''
 
-            search_name += item['name']
-            location = self.reptile_region_location(search_name)
+            search_name += item.name
 
-            # 对比code信息，若为直辖市code结尾为9900
-            if location is not None and (
-                    location['code'] == item['code'] or (location['code'] - item['code']) == 9900):
-                lon = location['lon']
-                lat = location['lat']
+            try:
+                result = requests.get(url + search_name)
+                if result.status_code == 200:
+                    result_json = result.json()
 
-                if lon is not None and lon != '':
-                    item['lon'] = float(lon)
+                    # 判断是否获取
+                    if result_json['detail'] is not None and result_json['detail']['area'] is not None:
+                        area = result_json['detail']['area']
 
-                if lat is not None and lat != '':
-                    item['lat'] = float(lat)
-                print(item)
-            else:
-                print(str(item['code']) + "\t" + item['name'])
+                        # 对比code信息，若为直辖市code结尾为9900
+                        if area['acode'] == item.code or area['acode'] - item.code:
+                            if area['pointx'] is not None and area['pointx'] != '':
+                                item.longitude = float(area['pointx'])
+                            if area['pointy'] is not None and area['pointy'] != '':
+                                item.latitude = float(area['pointy'])
 
-    def save_region(self, path):
-        """保存数据"""
-
-        file = open(path, 'w')
-        file.write(json.dumps(list(self.region_details.values()), ensure_ascii=False))
-        file.flush()
-        file.close()
+                print(item.to_string())
+            except:
+                print(search_name + " No Result")
